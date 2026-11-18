@@ -305,6 +305,7 @@ document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElemen
 addEventListener('wheel',e=>{if(started&&!paused)cycleWeapon(e.deltaY>0?1:-1);},{passive:true});
 function onPress(code){
   if(!started){if(code==='Enter'||code==='Space'){started=true;initAudio();lockMouse();camYaw=player.a;}return;}
+  if(code==='KeyO'){toggleMature();return;}
   if(code==='KeyP'||code==='Escape'){if(paused&&code==='KeyP'){paused=false;lockMouse();}else{paused=true;mouse.down=false;unlockMouse();}return;}
   if(paused)return;
   if(code==='KeyE'||code==='KeyF'){if(!interact())toggleCar();}
@@ -708,6 +709,7 @@ function updatePlayer(dt){
   player.hurtT-=dt;player.cool-=dt;player.aimT-=dt;player.punchT-=dt;
   if(!player.alive)return;
   if(lap){updateLap(dt);return;}
+  if(br){updateBackroom(dt);return;}
   const up=keys.KeyW||keys.ArrowUp,dn=keys.KeyS||keys.ArrowDown,lf=keys.KeyA||keys.ArrowLeft,rt=keys.KeyD||keys.ArrowRight;
   const wp=WEAP[player.w];
   if(player.car){const c=player.car;
@@ -1926,6 +1928,9 @@ function buildInteriors(){
     mark(I,230,172,'Pourboire — $20',20,()=>{I.tips=(I.tips||0)+1;for(let k=0;k<16;k++)addPart(player.x,player.y,rnd(-40,40),-rnd(60,140),rnd(0.8,1.4),'#4ac060',1.6,0,1,18,rnd(30,80),true);
       for(const d of I.actors)if(d.kind==='dancer'&&hyp(d.x-player.x,d.y-player.y)<160)d.cheerT=2;note(pick(['La danseuse t\'envoie un clin d\'œil','Elle danse rien que pour toi','Applaudissements dans la salle !','Pluie de billets sur la scène !']));});
     mark(I,410,290,'Danse privée — $150',150,()=>startLap(I));I.marks[I.marks.length-1].freeIf=()=>I.freeVip;
+    ib(I,450,20,1.5,20,40,2,matS('#4a0a14',0.5));{const t=neonText('LOGE PRIVÉE','#ff3fb0',40,9);t.position.set(I.ox+450,46,I.oy+3);I.grp.add(t);}
+    I.shakeTable=icyl(I,428,9,14,6,6,1.2,IM.wood,false);I.shakeLamp=icyl(I,428,13,14,1.6,2.2,6,emis('#ffb070',1.2));
+    mark(I,450,18,'Suivre la danseuse dans sa loge',0,()=>startBackroom(I));I.marks[I.marks.length-1].cond=()=>mature&&I.backroom;
     mark(I,60,60,'Shot — $15',15,()=>drink(0.35,'Shot'));mark(I,95,60,'Champagne — $120',120,()=>{drink(0.5,'Champagne');for(const a of I.actors)if(a.kind==='civ'||a.kind==='dancer')a.cheerT=3;note('Tournée générale ! Toute la salle t\'acclame');});}
   // ===== ARMURERIE =====
   {const I=mkInterior('gun','ARMURERIE DU PORT','Paiement comptant, pas de questions',300,220,64,2,null);shell(I,IM.concrete,IM.peg,'#2a2a2a',120,60);
@@ -1978,9 +1983,9 @@ function enterInterior(I){if(wanted>0){note('Impossible d\'entrer : la police te
   doFade(()=>{player.inside=I;player.x=I.spawn.x;player.y=I.spawn.y;player.bodyA=I.spawn.a;camYaw=I.spawn.a;camPitch=0.25;camSnap=true;player.swim=false;
     city.visible=false;intGroup.visible=true;for(const J of INT)J.grp.visible=J===I;bigMsg(I.name,I.sub,'#ff4fd8');});}
 function exitInterior(){const I=player.inside;doFade(()=>{player.inside=null;player.x=I.door.ox;player.y=I.door.oy;camYaw=I.door.a;player.bodyA=I.door.a;camSnap=true;city.visible=true;intGroup.visible=false;});}
-function nearMark(){if(!player.inside)return null;let best=null,bd=30;for(const m of player.inside.marks){const d=hyp(m.x-player.x,m.y-player.y);if(d<bd){bd=d;best=m;}}return best;}
+function nearMark(){if(!player.inside)return null;let best=null,bd=30;for(const m of player.inside.marks){if(m.cond&&!m.cond())continue;const d=hyp(m.x-player.x,m.y-player.y);if(d<bd){bd=d;best=m;}}return best;}
 function nearDoor(){if(player.inside||player.car)return null;for(const I of INT)if(I.door&&hyp(I.door.x-player.x,I.door.y-player.y)<34)return I;return null;}
-function interact(){if(lap)return true;if(player.car||!player.alive||fade>0)return false;
+function interact(){if(lap||br)return true;if(player.car||!player.alive||fade>0)return false;
   if(player.inside){const m=nearMark();if(!m)return false;if(m.exit){exitInterior();return true;}
     const price=m.freeIf&&m.freeIf()?0:m.price;if(price&&player.money<price){note('Pas assez d\'argent ($'+price+')');return true;}if(price)player.money-=price;m.act();return true;}
   const I=nearDoor();if(I){enterInterior(I);return true;}return false;}
@@ -2016,7 +2021,19 @@ function updateInteriors(dt){
   }else if(R){R.hands=false;R.shootPose=false;}
 }
 // ---------- mini-jeu : danse privée sous l'œil du videur ----------
-let lap=null;
+let lap=null,br=null,mature=false,matureArm=0;try{mature=localStorage.getItem('portneon_mature')==='1';}catch(e){}
+function toggleMature(){const now=performance.now();
+  if(mature){mature=false;note('Contenu mature désactivé');}
+  else if(now<matureArm){mature=true;note('Contenu mature (18+) activé');}
+  else{matureArm=now+5000;note('Réservé aux adultes (18+) : appuie à nouveau sur O pour confirmer');return;}
+  matureArm=0;try{localStorage.setItem('portneon_mature',mature?'1':'0');}catch(e){}}
+function startBackroom(I){if(br)return;doFade(()=>{br={I,t:10,beat:0};player.x=I.ox+452;player.y=I.oy-30;});}
+function updateBackroom(dt){const B=br,I=B.I;B.t-=dt;B.beat-=dt;const k=Math.sin(time*7.5);
+  if(I.shakeTable){I.shakeTable.rotation.z=k*0.05;I.shakeTable.position.x=I.ox+428+k*0.6;I.shakeLamp.rotation.z=-k*0.14;I.shakeLamp.position.x=I.ox+428+k*0.9;}
+  if(B.beat<=0){B.beat=0.42;if(AC&&!muted){noise(0.16,240,0.16);tone(90,0.1,0.04,'sine');}shake(1.1);}
+  if(B.t<=0&&fade===0)doFade(()=>{br=null;if(I.shakeTable){I.shakeTable.rotation.z=0;I.shakeTable.position.x=I.ox+428;I.shakeLamp.rotation.z=0;I.shakeLamp.position.x=I.ox+428;}
+    player.x=I.ox+440;player.y=I.oy+70;player.bodyA=Math.PI/2;camYaw=Math.PI/2;camSnap=true;player.hp=100;player.drunk=Math.max(0,player.drunk-0.3);I.backroom=false;
+    bigMsg('…','Elle remet sa veste et te sourit. Santé au maximum.','#ff4fd8',4);});}
 function startLap(I){
   const d=I.actors.find(a=>a.kind==='dancer'&&!a.priv&&!a.roam)||I.actors.find(a=>a.kind==='dancer'&&!a.priv);const b=I.actors.find(a=>a.kind==='bouncer');
   if(!d||!b){note('Aucune danseuse disponible');return;}
@@ -2030,7 +2047,7 @@ function endLap(kind){
   const L=lap;if(!L)return;const {I,d,b}=L;lap=null;
   d.priv=0.0001;b.walking=false;b.x=b.home.x;b.y=b.home.y;b.a=b.home.a;
   player.x=I.ox+392;player.y=I.oy+250;player.bodyA=-Math.PI/2;camYaw=-Math.PI/2;camSnap=true;
-  if(kind==='win'){I.freeVip=true;player.money+=200;SFX.win();bigMsg('ELLE CRAQUE !','Elle te glisse son numéro et te rend $200 — danses privées gratuites ce soir','#ff4fd8',4);}
+  if(kind==='win'){if(mature){I.backroom=true;setTimeout(()=>note('Elle t\'attend dans sa loge, au fond à droite près du DJ (E)'),4300);}I.freeVip=true;player.money+=200;SFX.win();bigMsg('ELLE CRAQUE !','Elle te glisse son numéro et te rend $200 — danses privées gratuites ce soir','#ff4fd8',4);}
   else if(kind==='caught'){SFX.fail();hurtPlayer(12);const f=Math.min(player.money,100);player.money-=f;I.bannedUntil=time+90;
     doFade(()=>{player.inside=null;player.x=I.door.ox;player.y=I.door.oy;camYaw=I.door.a;player.bodyA=I.door.a;camSnap=true;city.visible=true;intGroup.visible=false;
       bigMsg('VIRÉ DU VELVET !','Le videur t\'a jeté dehors (-$'+f+'). Interdit d\'entrée pendant 90 s','#ff5252',4);});}
@@ -2151,6 +2168,8 @@ function syncHeadlights(){const c=player.car;const on=c&&night>0.05;
 
 // ---------- caméra ----------
 function updateCam3D(dt){
+  if(br){const I=br.I;camera.position.set(I.ox+382,28,I.oy+96);camera.lookAt(I.ox+445,20,I.oy+6);camera.fov=55;camera.updateProjectionMatrix();camPos.x=camera.position.x;camPos.y=camera.position.y;camPos.z=camera.position.z;
+    const sc=H*renderer.getPixelRatio()/(2*Math.tan(camera.fov*Math.PI/360));PS.mat.uniforms.scale.value=sc;GL.mat.uniforms.scale.value=sc;return;}
   if(lap&&!fpsMode){const I=lap.I;camera.position.set(I.ox+452,40,I.oy+318);camera.lookAt(I.ox+360,14,I.oy+262);camera.fov+=(58-camera.fov)*Math.min(1,dt*4);camera.updateProjectionMatrix();
     camPos.x=camera.position.x;camPos.y=camera.position.y;camPos.z=camera.position.z;const sc=H*renderer.getPixelRatio()/(2*Math.tan(camera.fov*Math.PI/360));PS.mat.uniforms.scale.value=sc;GL.mat.uniforms.scale.value=sc;return;}
   if(!started){const t=time*0.035,cx=MT*T/2,cy=MT*T/2;camera.position.set(cx+Math.cos(t)*1500,520,cy+Math.sin(t)*1500);camera.lookAt(cx,40,cy);
@@ -2267,7 +2286,7 @@ function render(dt){
   sky.position.copy(camera.position);stars.position.copy(camera.position);
   moon.position.set(camera.position.x-_sd.x*3500,camera.position.y-_sd.y*3500,camera.position.z-_sd.z*3500);moon.visible=_sd.y<0.05;
   if(poolMat)poolMat.opacity=night*0.3;
-  updateFade(dt||0.016);grade.uniforms.time.value=time;grade.uniforms.hurt.value=Math.max(0,player.hurtT)*2;grade.uniforms.drunk.value=player.drunk>0.25?Math.min(1.5,player.drunk-0.2)*0.8:0;grade.uniforms.fade.value=fade;
+  updateFade(dt||0.016);grade.uniforms.time.value=time;grade.uniforms.hurt.value=Math.max(0,player.hurtT)*2;grade.uniforms.drunk.value=br?0.95:player.drunk>0.25?Math.min(1.5,player.drunk-0.2)*0.8:0;grade.uniforms.fade.value=fade;
   updateAtmos(dt);
   composer.render();
   ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);drawHUD();
@@ -2369,6 +2388,7 @@ function drawTitle(){
   if(Math.floor(time*2)%2)txt('CLIQUE POUR JOUER',W/2,H-50,'#fff','28px '+FONT,'center','middle');
 }
 function drawPause(){ctx.fillStyle='rgba(5,8,15,0.72)';ctx.fillRect(0,0,W,H);txt('PAUSE',W/2,H*0.09,'#fff','52px '+FONT,'center','middle');
+  txt('O : contenu mature (18+) — '+(mature?'ACTIVÉ':'désactivé')+(performance.now()<matureArm?'  •  appuie à nouveau sur O pour confirmer':''),W/2,H-115,mature?'#ff4fd8':'rgba(255,255,255,0.7)','bold 15px sans-serif','center');
   drawHelp(H*0.09+50);txt('Kills : '+kills+'   •   Argent : $'+player.money,W/2,H-80,'#7CFC7C','bold 18px sans-serif','center');
   txt('Clique pour reprendre',W/2,H-45,'#fff','bold 20px sans-serif','center');}
 
