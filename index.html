@@ -730,7 +730,7 @@ function updatePlayer(dt){
     if(f||s){const l=hyp(f,s),fx=Math.cos(camYaw),fy=Math.sin(camYaw);
       let dx=(fx*f-fy*s)/l,dy=(fy*f+fx*s)/l;if(player.drunk>0.3){const da=Math.sin(time*0.9)*0.6*Math.min(1.3,player.drunk-0.3),c2=Math.cos(da),s2=Math.sin(da);const ndx=dx*c2-dy*s2;dy=dx*s2+dy*c2;dx=ndx;}
       const nx=player.x+dx*sp*dt,ny=player.y+dy*sp*dt;
-      if(!pBlocked(nx,player.y,8))player.x=nx;if(!pBlocked(player.x,ny,8))player.y=ny;player.moving=true;player.runS=sp;player.anim+=dt*sp/40;
+      const stuck=pBlocked(player.x,player.y,8);if(stuck||!pBlocked(nx,player.y,8))player.x=nx;if(stuck||!pBlocked(player.x,ny,8))player.y=ny;player.moving=true;player.runS=sp;player.anim+=dt*sp/40;
       if(!aiming)player.bodyA+=angDiff(player.bodyA,Math.atan2(dy,dx))*(1-Math.exp(-12*dt));}
     if(aiming||player.punchT>0)player.bodyA+=angDiff(player.bodyA,camYaw)*(1-Math.exp(-25*dt));
     if(fpsMode)player.bodyA=camYaw;
@@ -1933,7 +1933,7 @@ function buildInteriors(){
     I.lights=[[190,72,100,'#ffd6ec',170],[270,72,100,'#ffd6ec',170],[230,72,140,'#ff70c8',110],[95,72,215,'#c8a0ff',110],[365,72,215,'#c8a0ff',110],[398,58,282,'#ffb0d8',120]];I.disco=true;
     mark(I,230,172,'Pourboire — $20',20,()=>{I.tips=(I.tips||0)+1;for(let k=0;k<16;k++)addPart(player.x,player.y,rnd(-40,40),-rnd(60,140),rnd(0.8,1.4),'#4ac060',1.6,0,1,18,rnd(30,80),true);
       for(const d of I.actors)if(d.kind==='dancer'&&hyp(d.x-player.x,d.y-player.y)<160)d.cheerT=2;note(pick(['La danseuse t\'envoie un clin d\'œil','Elle danse rien que pour toi','Applaudissements dans la salle !','Pluie de billets sur la scène !']));});
-    mark(I,410,290,'Danse privée — $150',150,()=>startLap(I));I.marks[I.marks.length-1].freeIf=()=>I.freeVip;
+    mark(I,394,290,'Danse privée — $150',150,()=>startLap(I));I.marks[I.marks.length-1].freeIf=()=>I.freeVip;
     ib(I,450,20,1.5,20,40,2,matS('#4a0a14',0.5));{const t=neonText('LOGE PRIVÉE','#ff3fb0',40,9);t.position.set(I.ox+450,46,I.oy+3);I.grp.add(t);}
     I.shakeTable=icyl(I,428,9,14,6,6,1.2,IM.wood,false);I.shakeLamp=icyl(I,428,13,14,1.6,2.2,6,emis('#ffb070',1.2));
     mark(I,450,18,'Suivre la danseuse dans sa loge',0,()=>startBackroom(I));I.marks[I.marks.length-1].cond=()=>mature&&I.backroom;
@@ -2000,7 +2000,7 @@ function updateInteriors(dt){
   if(I.alarm>0){I.alarm-=dt;unseen=0;}
   if(I.ball)I.ball.rotation.y+=dt*0.6;if(I.tv)I.tv.material.emissiveIntensity=0.8+Math.random()*0.6;
   for(const A of I.actors){const h=A.h;A.t-=dt;
-    if(A.priv>0){A.priv-=dt;if(A.priv<=0){A.x=A.saved.x;A.y=A.saved.y;A.a=A.saved.a;}}
+    if(A.priv>0){A.priv-=dt;if(A.priv<=0){A.x=A.saved.x;A.y=A.saved.y;A.a=A.saved.a;A.priv=0;}}
     if(A.cheerT>0)A.cheerT-=dt;
     if(A.base==='sit'&&A.t<=0){A.t=rnd(4,10);A.drinkT=1.6;}if(A.drinkT>0)A.drinkT-=dt;
     let moving=false;const priv=A.priv>0;
@@ -2144,7 +2144,7 @@ function startLap(I){
 function endLap(kind){
   const L=lap;if(!L)return;const {I,d,b}=L;lap=null;
   d.priv=0.0001;b.walking=false;b.x=b.home.x;b.y=b.home.y;b.a=b.home.a;
-  player.x=I.ox+392;player.y=I.oy+250;player.bodyA=-Math.PI/2;camYaw=-Math.PI/2;camSnap=true;
+  player.x=I.ox+368;player.y=I.oy+290;player.bodyA=Math.PI;camYaw=Math.PI;camSnap=true;
   if(kind==='win'){if(mature){I.backroom=true;setTimeout(()=>note('Elle t\'attend dans sa loge, au fond à droite près du DJ (E)'),4300);}I.freeVip=true;player.money+=200;SFX.win();bigMsg('ELLE CRAQUE !','Elle te glisse son numéro et te rend $200 — danses privées gratuites ce soir','#ff4fd8',4);}
   else if(kind==='caught'){SFX.fail();hurtPlayer(12);const f=Math.min(player.money,100);player.money-=f;I.bannedUntil=time+90;
     doFade(()=>{player.inside=null;player.x=I.door.ox;player.y=I.door.oy;camYaw=I.door.a;player.bodyA=I.door.a;camSnap=true;city.visible=true;intGroup.visible=false;
