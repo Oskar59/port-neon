@@ -285,29 +285,31 @@ let started=false,paused=false;
 let camYaw=-Math.PI/2,camPitch=0.28,freeLookT=0,fpsMode=true;
 function lockMouse(){try{if(cv.requestPointerLock)cv.requestPointerLock();}catch(e){}}
 function unlockMouse(){try{if(document.exitPointerLock)document.exitPointerLock();}catch(e){}}
-addEventListener('keydown',e=>{if(chatOpen)return;
+addEventListener('keydown',e=>{if(chatOpen||(e.target&&e.target.tagName==='INPUT'))return;
   if(!keys[e.code])onPress(e.code);keys[e.code]=true;
   if(['Space','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();});
 addEventListener('keyup',e=>{keys[e.code]=false;});
 addEventListener('blur',()=>{for(const k in keys)keys[k]=false;mouse.down=false;mouse.right=false;});
-addEventListener('mousemove',e=>{
+addEventListener('mousemove',e=>{mouse.cx=e.clientX;mouse.cy=e.clientY;if(mapOpen)return;
   if(!started||paused)return;const mx=e.movementX||0,my=e.movementY||0;
   if(Math.abs(mx)>250||Math.abs(my)>250)return;
   const s=mouse.right&&!player.car?0.0016:0.0026;
   camYaw+=mx*s;camPitch=clamp(camPitch+my*0.002,-0.1,1.15);
   if(player.car&&Math.abs(mx)>1)freeLookT=1.4;});
 cv.addEventListener('mousedown',e=>{initAudio();
+  if(mapOpen){mapClick(e.clientX,e.clientY,e.button);return;}
   if(!started){started=true;mouse.shot=true;lockMouse();camYaw=player.a;return;}
   if(paused){paused=false;lockMouse();mouse.shot=true;return;}
   if(document.pointerLockElement!==cv)lockMouse();
   if(e.button===0)mouse.down=true;if(e.button===2)mouse.right=true;});
 addEventListener('mouseup',e=>{if(e.button===0){mouse.down=false;mouse.shot=false;}if(e.button===2)mouse.right=false;});
 cv.addEventListener('contextmenu',e=>e.preventDefault());
-document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==cv&&started&&!paused&&!chatOpen){paused=true;mouse.down=false;mouse.right=false;}});
+document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==cv&&started&&!paused&&!chatOpen&&!mapOpen){paused=true;mouse.down=false;mouse.right=false;}});
 addEventListener('wheel',e=>{if(started&&!paused)cycleWeapon(e.deltaY>0?1:-1);},{passive:true});
 function onPress(code){
   if(!started){if(code==='Enter'||code==='Space'){started=true;initAudio();lockMouse();camYaw=player.a;}return;}
   if(code==='KeyO'){toggleMature();return;}
+  if(mapOpen&&(code==='Escape'||code==='KeyC')){mapOpen=false;lockMouse();return;}
   if(code==='KeyP'||code==='Escape'){if(paused&&code==='KeyP'){paused=false;lockMouse();}else{paused=true;mouse.down=false;unlockMouse();}return;}
   if(paused)return;
   if(code==='KeyE'||code==='KeyF'){if(!interact())toggleCar();}
@@ -319,7 +321,8 @@ function onPress(code){
   if(code==='KeyH'&&player.car)SFX.horn(player.x,player.y);
   if(code==='KeyQ'||code==='Tab')cycleWeapon(1);
   if(code==='KeyT'){openChat();return;}
-  if(code==='Space'&&!lap&&!player.car&&player.alive&&!player.swim&&player.z<=0.01){player.vz=165;SFX.jump();}
+  if(code==='KeyC'){mapOpen=true;mouse.down=false;unlockMouse();return;}
+  if(code==='Space'&&!lap&&!player.car&&player.alive&&!player.swim&&player.z<=0.01){player.vz=lune?280:165;SFX.jump();}
 }
 
 // =====================================================================
@@ -690,6 +693,7 @@ function updatePed(p,dt){
 //  JOUEUR
 // =====================================================================
 function hurtPlayer(d){
+  if(god)return;
   if(!player.alive)return;
   if(player.armor>0){const a=Math.min(player.armor,d*0.7);player.armor-=a;d-=a;}
   player.hp-=d;player.hurtT=0.35;SFX.hurt();
@@ -719,13 +723,14 @@ function updatePlayer(dt){
   const up=keys.KeyW||keys.ArrowUp,dn=keys.KeyS||keys.ArrowDown,lf=keys.KeyA||keys.ArrowLeft,rt=keys.KeyD||keys.ArrowRight;
   const wp=WEAP[player.w];
   if(player.car){const c=player.car;
+    if(turbo){c.maxV=CT[c.type].maxV*1.7;c.acc=CT[c.type].acc*1.8;c.turboed=true;}else if(c.turboed){c.maxV=CT[c.type].maxV;c.acc=CT[c.type].acc;c.turboed=false;}
     carPhysics(c,up?1:dn?-1:0,clamp((lf?-1:rt?1:0)+(player.drunk>0.3?Math.sin(time*1.4)*0.55*Math.min(1.2,player.drunk):0),-1,1),!!keys.Space,dt);
     player.x=c.x;player.y=c.y;player.a=camYaw;
   }else{
     const aiming=(mouse.right&&!wp.melee)||player.aimT>0;
     const f=(up?1:0)-(dn?1:0),s=(rt?1:0)-(lf?1:0);
     const run=(keys.ShiftLeft||keys.ShiftRight)&&!aiming;
-    player.swim=!player.inside&&tileAt(player.x,player.y)===WATER;const sp=player.swim?(run?95:70):run?220:(aiming?100:130);
+    player.swim=!player.inside&&tileAt(player.x,player.y)===WATER;const sp=player.swim?(run?70:55):run?150:(aiming?65:85);
     player.moving=false;player.a=camYaw;
     if(f||s){const l=hyp(f,s),fx=Math.cos(camYaw),fy=Math.sin(camYaw);
       let dx=(fx*f-fy*s)/l,dy=(fy*f+fx*s)/l;if(player.drunk>0.3){const da=Math.sin(time*0.9)*0.6*Math.min(1.3,player.drunk-0.3),c2=Math.cos(da),s2=Math.sin(da);const ndx=dx*c2-dy*s2;dy=dx*s2+dy*c2;dx=ndx;}
@@ -734,10 +739,12 @@ function updatePlayer(dt){
       if(!aiming)player.bodyA+=angDiff(player.bodyA,Math.atan2(dy,dx))*(1-Math.exp(-12*dt));}
     if(aiming||player.punchT>0)player.bodyA+=angDiff(player.bodyA,camYaw)*(1-Math.exp(-25*dt));
     if(fpsMode)player.bodyA=camYaw;
-    player.vz-=600*dt;player.z+=player.vz*dt;if(player.z<=0){player.z=0;player.vz=0;}
+    player.vz-=(lune?170:600)*dt;player.z+=player.vz*dt;if(player.z<=0){player.z=0;player.vz=0;}
   }
   mouse.wx=player.x+Math.cos(camYaw)*400;mouse.wy=player.y+Math.sin(camYaw)*400;
-  if(mouse.down&&player.cool<=0&&!player.swim&&(wp.auto||!mouse.shot)){
+  const noArms=player.inside&&player.inside.id==='club';
+  if(noArms&&mouse.down&&!mouse.shot&&player.cool<=0){mouse.shot=true;player.cool=1;note('Armes interdites au Velvet — le videur veille');}
+  if(!noArms&&mouse.down&&player.cool<=0&&!player.swim&&(wp.auto||!mouse.shot)){
     if(wp.melee){if(!player.car){player.bodyA=camYaw;player.punchT=0.28;player.cool=wp.rate;melee(wp);}}
     else if(player.ammo[player.w]>0){
       if(!player.car)player.bodyA=camYaw;player.aimT=1.2;
@@ -983,7 +990,7 @@ function mkCanvas(w,h){const c=document.createElement('canvas');c.width=w;c.heig
 function canvasTex(c,srgb=true,rep=true){const t=new THREE.CanvasTexture(c);if(srgb)t.colorSpace=THREE.SRGBColorSpace;t.anisotropy=MAXANI;if(rep)t.wrapS=t.wrapT=THREE.RepeatWrapping;return t;}
 function updateSky(dt){
   dayT=(dayT+dt/900)%1;
-  {const rt=hash(Math.floor(Date.now()/300000),7)<0.3?1:0;if(rt&&!rainTarget&&started)note('La pluie commence à tomber…');rainTarget=rt;}
+  {const rt=hash(Math.floor(Date.now()/300000),7)<0.3?1:0;if(rt&&!rainTarget&&started)note('La pluie commence à tomber…');rainTarget=rainForce!==null?rainForce:rt;}
   rainF+=(rainTarget-rainF)*Math.min(1,dt*0.08);
   const ang=(dayT-0.25)*TAU,el=Math.sin(ang);
   _sd.set(Math.cos(ang)*0.8,el,0.45).normalize();
@@ -1987,7 +1994,7 @@ function placeDoors(){
 function intBlocked(I,x,y,r){for(const w of I.walls)if(x+r>w[0]&&x-r<w[2]&&y+r>w[1]&&y-r<w[3])return true;return false;}
 function enterInterior(I){if(wanted>0){note('Impossible d\'entrer : la police te voit !');return;}if(I.bannedUntil&&time<I.bannedUntil){note('Le videur te bloque l\'entrée : « Toi, tu dégages ! »');return;}
   doFade(()=>{player.inside=I;player.x=I.spawn.x;player.y=I.spawn.y;player.bodyA=I.spawn.a;camYaw=I.spawn.a;camPitch=0.25;camSnap=true;player.swim=false;
-    city.visible=false;intGroup.visible=true;for(const J of INT)J.grp.visible=J===I;bigMsg(I.name,I.sub,'#ff4fd8');});}
+    city.visible=false;intGroup.visible=true;for(const J of INT)J.grp.visible=J===I;if(I.id==='club'){player.w=0;note('Vestiaire : armes déposées à l\'entrée');}bigMsg(I.name,I.sub,'#ff4fd8');});}
 function exitInterior(){const I=player.inside;doFade(()=>{player.inside=null;player.x=I.door.ox;player.y=I.door.oy;camYaw=I.door.a;player.bodyA=I.door.a;camSnap=true;city.visible=true;intGroup.visible=false;});}
 function nearMark(){if(!player.inside)return null;let best=null,bd=30;for(const m of player.inside.marks){if(m.cond&&!m.cond())continue;const d=hyp(m.x-player.x,m.y-player.y);if(d<bd){bd=d;best=m;}}return best;}
 function nearDoor(){if(player.inside||player.car)return null;for(const I of INT)if(I.door&&hyp(I.door.x-player.x,I.door.y-player.y)<34)return I;return null;}
@@ -2029,7 +2036,7 @@ function updateInteriors(dt){
 // =====================================================================
 //  MULTIJOUEUR (pair-à-pair WebRTC via Trystero, sans serveur)
 // =====================================================================
-const GAME_VERSION='1.6';let net=null,netT=0,helloT=0,lastHit=null;const remotes=new Map();
+const GAME_VERSION='1.7';let net=null,netT=0,helloT=0,lastHit=null;const remotes=new Map();
 let myName='Joueur'+Math.floor(100+Math.random()*900);try{const n=localStorage.getItem('portneon_name');if(n)myName=n;}catch(e){}
 const roomName=((location.hash||'').match(/^#salle-([a-z0-9-]{2,24})$/i)||[])[1]||'public';
 let netStatus='connexion…';
@@ -2120,6 +2127,7 @@ function closeChat(){chatOpen=false;chatInput.style.display='none';chatInput.blu
 function addChat(name,msg){chatLog.push({name,msg,t:time});if(chatLog.length>8)chatLog.shift();if(AC)tone(1200,0.05,0.04,'sine');}
 function sendChat(v){
   const m=v.match(/^\/nom\s+(.{2,16})$/i);if(m){myName=m[1].trim();try{localStorage.setItem('portneon_name',myName);}catch(e){}netSend({k:'hello',name:myName,look:player.look});note('Tu t\'appelles maintenant '+myName);return;}
+  if(tryCheat(v))return;
   const s=v.match(/^\/salle\s+([a-z0-9-]{2,24})$/i);if(s){location.hash='salle-'+s[1].toLowerCase();location.reload();return;}
   addChat(myName,v);netSend({k:'chat',msg:v});}
 chatInput.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter'){const v=chatInput.value.trim();if(v)sendChat(v);closeChat();}else if(e.key==='Escape')closeChat();});
@@ -2135,6 +2143,80 @@ function drawNet(){
   chatLog.filter(c=>time-c.t<18).slice(-6).forEach((c,i,a)=>{ctx.globalAlpha=clamp(18-(time-c.t),0,1);txt(c.name+' : '+c.msg,18,by-(a.length-1-i)*19,'#fff','bold 14px sans-serif','left','bottom');});ctx.globalAlpha=1;
   if(!chatOpen&&!paused)txt('T : chat',W-18,H-22,'rgba(255,255,255,0.45)','12px sans-serif','right','bottom');
 }
+
+// ---------- codes de triche, carte, quartiers, pseudo ----------
+let god=false,turbo=false,lune=false,rainForce=null,mapOpen=false,waypoint=null,areaName='',areaShowT=0;
+function spawnNear(type){const a=camYaw;let x=player.x+Math.cos(a)*45,y=player.y+Math.sin(a)*45;if(wallAt(x,y)){x=player.x-Math.cos(a)*45;y=player.y-Math.sin(a)*45;}
+  const c=makeCar(type,x,y,a);c.h=type==='boat'?-1.6:groundH(x,y);cars.push(c);return c;}
+const CHEATS={
+  PACTOLE:()=>{player.money+=100000;return '+$100 000';},
+  ARSENAL:()=>{player.ammo=[Infinity,Infinity,999,999,200,999,50];return 'Toutes les armes, munitions au max';},
+  INVINCIBLE:()=>{god=!god;return god?'Invincibilité ACTIVÉE':'Invincibilité désactivée';},
+  SANTE:()=>{player.hp=100;player.armor=100;return 'Santé et gilet au maximum';},
+  PASVU:()=>{heat=0;wanted=0;return 'La police t\'oublie';},
+  CHAOS:()=>{crime(25);return '5 étoiles — bonne chance';},
+  BOLIDE:()=>{spawnNear('sport');return 'Une sportive t\'attend';},
+  MUSCLE:()=>{spawnNear('muscle');return 'Muscle car livrée';},
+  GYROPHARE:()=>{spawnNear('police');return 'Voiture de police livrée';},
+  BATEAU:()=>{if(tileAt(player.x,player.y)!==WATER&&tileAt(player.x+Math.cos(camYaw)*45,player.y+Math.sin(camYaw)*45)!==WATER)return 'Va au bord de l\'eau d\'abord';spawnNear('boat');return 'Hors-bord livré';},
+  BOUM:()=>{let n=0;for(const c of cars)if(c!==player.car&&!c.remote&&!c.dead&&hyp(c.x-player.x,c.y-player.y)<700){damageCar(c,999,null);n++;}return n+' véhicules vont exploser';},
+  TURBO:()=>{turbo=!turbo;return turbo?'Voitures surpuissantes':'Turbo désactivé';},
+  LUNE:()=>{lune=!lune;return lune?'Gravité lunaire':'Gravité normale';},
+  NUIT:()=>{dayT=0.92;envT=0;return 'Il fait nuit';},
+  JOUR:()=>{dayT=0.45;envT=0;return 'Il fait jour';},
+  PLUIE:()=>{rainForce=1;return 'Pluie forcée';},
+  SOLEIL:()=>{rainForce=0;return 'Grand soleil';},
+  METEO:()=>{rainForce=null;return 'Météo normale';},
+  SOBRE:()=>{player.drunk=0;return 'Tu es sobre';},
+};
+function tryCheat(v){const c=v.normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/[^A-Z]/g,'');if(!CHEATS[c])return false;
+  const msg=CHEATS[c]();bigMsg('CODE ACTIVÉ',msg,'#7CFC7C',2.5);SFX.win();return true;}
+// --- quartiers ---
+const DISTRICTS=(()=>{const groups={},add=(k,b)=>{(groups[k]=groups[k]||[]).push(b);};
+  for(const b of blocks){if(b.dist==='downtown')add('Centre-ville',b);else if(b.dist==='industrial')add('Zone industrielle',b);
+    else if(b.dist==='residential'){if(b.bj===0)add('Les Hauts',b);else if(b.bj===NBY-1)add('Bord de mer',b);else if(b.bi===0)add('Quartier Ouest',b);else add('Quartier Est',b);}
+    else{if(b.bi<NBX/2&&b.bj<NBY/2)add('Vieille Ville',b);else if(b.bi>=NBX/2&&b.bj<NBY/2)add('Quartier des Arts',b);else if(b.bi<NBX/2)add('Saint-Néon',b);else add('Les Quais',b);}}
+  const out=[];for(const k in groups){const g=groups[k];const x=g.reduce((s,b)=>s+(b.x0+b.x1+1)/2,0)/g.length*T,y=g.reduce((s,b)=>s+(b.y0+b.y1+1)/2,0)/g.length*T;out.push({name:k,x,y,blocks:new Set(g)});}
+  return out;})();
+function districtAt(x,y){if(player.inside)return player.inside.name;const tx=Math.floor(x/T),ty=Math.floor(y/T);
+  if(tile(tx,ty)===WATER&&!inBlock[ty*MT+tx])return 'En mer';if(tx<RX[0]||ty<RY[0]||tx>=AX.end||ty>=AY.end)return tx>=AX.end&&ty>=RY[NBY-3]?'Le Port':'La Plage';
+  let best=null,bd=1e9;for(const b of blocks){const cx=(b.x0+b.x1+1)/2,cy=(b.y0+b.y1+1)/2,d=Math.abs(cx-tx)+Math.abs(cy-ty);if(d<bd){bd=d;best=b;}}
+  for(const D of DISTRICTS)if(D.blocks.has(best))return D.name;return '';}
+function updateArea(dt){const a=districtAt(player.x,player.y);if(a!==areaName){areaName=a;areaShowT=4;}areaShowT-=dt;
+  if(waypoint&&hyp(waypoint.x-player.x,waypoint.y-player.y)<70&&!player.inside){waypoint=null;note('Tu es arrivé au repère');SFX.pick();}}
+// --- carte plein écran ---
+function mapRect(){const S=Math.min(W,H)-90,x=(W-S)/2,y=(H-S)/2+12;return {S,x,y,s:S/MT};}
+function mapClick(cx,cy,btn){const {S,x,y,s}=mapRect();if(btn===2){waypoint=null;note('Repère effacé');return;}if(cx<x||cy<y||cx>x+S||cy>y+S)return;
+  waypoint={x:(cx-x)/s*T,y:(cy-y)/s*T};note('Repère GPS posé — suis la flèche bleue');SFX.pick();}
+function drawFullMap(){const {S,x,y,s}=mapRect();
+  ctx.fillStyle='rgba(4,6,12,0.9)';ctx.fillRect(0,0,W,H);ctx.imageSmoothingEnabled=false;ctx.drawImage(mm,x,y,S,S);ctx.imageSmoothingEnabled=true;
+  ctx.strokeStyle='#ff4fd8';ctx.lineWidth=2;ctx.strokeRect(x,y,S,S);
+  const P=(wx,wy)=>[x+wx/T*s,y+wy/T*s];const fs=Math.round(clamp(S/48,10,15));
+  for(const d of DISTRICTS){const [px,py]=P(d.x,d.y);txt(d.name.toUpperCase(),px,py,'rgba(255,255,255,0.55)','bold '+fs+'px sans-serif','center','middle');}
+  const place=(wx,wy,col,lab,r=5)=>{const [px,py]=P(wx,wy);ctx.fillStyle=col;ctx.beginPath();ctx.arc(px,py,r,0,TAU);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=2;ctx.stroke();if(lab)txt(lab,px+r+4,py,col,'bold '+(fs-1)+'px sans-serif','left','middle');};
+  place(hospPos.x,hospPos.y,'#ff4d4d','Hôpital');place(policePos.x,policePos.y,'#4d7cff','Police');place(garage.x,garage.y,'#5fd3ff','Carrosserie');
+  for(const I of INT)if(I.door)place(I.door.x,I.door.y,{bar:'#ff3fb0',club:'#b040ff',gun:'#ffb020',flat:'#5fd3ff'}[I.id],{bar:'Néon Bar',club:'Velvet Club',gun:'Armurerie',flat:'Planque'}[I.id]);
+  if(church)place((church.nx0+1.5)*T,(church.ny0+2)*T,'#e8dcc0','Église');if(gas)place((gas.cx0+2)*T,(gas.cy0+1)*T,'#ff6040','Station-service');
+  if(ferris)place(ferris.x,ferris.y,'#ff4fd8','Grande roue');if(lighthouse)place(lighthouse.x,lighthouse.y,'#fff4c0','Phare');
+  const big=buildings.find(b=>b.landmark);if(big)place(big.x+big.w/2,big.y+big.h/2,'#9fd8ff','Tour Néon');if(cranes.length)place(cranes[0].x,cranes[0].y,'#ffb020','Port');
+  if(!mission)for(const g of givers)place(g.x,g.y,'#ffd23f','Mission',4);
+  const t=missionTarget();if(t)place(t.x,t.y,t.col,'Objectif',7);if(waypoint)place(waypoint.x,waypoint.y,'#40c0ff','Repère',7);
+  for(const r of remotes.values()){const s2=r.cur;if(s2&&!s2.i&&r.x!==undefined)place(s2.c?s2.c.x:r.x,s2.c?s2.c.y:r.y,'#ff4fd8',r.name,6);}
+  const me=player.inside&&player.inside.door?player.inside.door:player;const [px,py]=P(me.x,me.y);
+  ctx.save();ctx.translate(px,py);ctx.rotate(player.car?player.car.a:player.bodyA);ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(11,0);ctx.lineTo(-8,-7);ctx.lineTo(-4,0);ctx.lineTo(-8,7);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();
+  txt('CARTE DE PORT NÉON',W/2,y-34,'#ff4fd8','22px '+FONT,'center','bottom');
+  txt('Clic gauche : poser un repère GPS  •  clic droit : l\'effacer  •  C ou Échap : fermer',W/2,y-12,'rgba(255,255,255,0.8)','13px sans-serif','center','bottom');
+  if(mouse.cx!==undefined){ctx.strokeStyle='#40c0ff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(mouse.cx,mouse.cy,8,0,TAU);ctx.moveTo(mouse.cx-14,mouse.cy);ctx.lineTo(mouse.cx+14,mouse.cy);ctx.moveTo(mouse.cx,mouse.cy-14);ctx.lineTo(mouse.cx,mouse.cy+14);ctx.stroke();}
+}
+// --- champ pseudo (écran titre) ---
+const nameInput=document.createElement('input');nameInput.maxLength=16;nameInput.value=myName;nameInput.setAttribute('aria-label','Ton pseudo');nameInput.id='pseudo';
+Object.assign(nameInput.style,{position:'fixed',left:'50%',bottom:'112px',transform:'translateX(-50%)',width:'220px',zIndex:6,display:'none',padding:'8px 12px',font:'bold 16px sans-serif',textAlign:'center',
+  background:'rgba(8,6,14,0.85)',color:'#ffd23f',border:'2px solid #ff4fd8',borderRadius:'8px',outline:'none'});
+document.body.appendChild(nameInput);
+const applyName=()=>{const v=nameInput.value.trim().replace(/[<>]/g,'').slice(0,16);if(v.length>=2&&v!==myName){myName=v;try{localStorage.setItem('portneon_name',myName);}catch(e){}netSend({k:'hello',name:myName,look:player.look});}};
+nameInput.addEventListener('input',applyName);nameInput.addEventListener('keydown',e=>{e.stopPropagation();if(e.key==='Enter')nameInput.blur();});
+function syncNameInput(){const show=!started&&!chatOpen;nameInput.style.display=show?'block':'none';}
 
 // ---------- mini-jeu : danse privée sous l'œil du videur ----------
 let lap=null,br=null,mature=false,matureArm=0;try{mature=localStorage.getItem('portneon_mature')==='1';}catch(e){}
@@ -2265,10 +2347,10 @@ const nextRing=new THREE.Mesh(new THREE.RingGeometry(26,32,32),new THREE.MeshBas
 const targetArrow=new THREE.Mesh(new THREE.ConeGeometry(6,14,4),new THREE.MeshBasicMaterial({color:'#ff3030',toneMapped:false}));targetArrow.rotation.x=Math.PI;scene.add(targetArrow);
 function syncMarkers(){const pulse=(Math.sin(time*4)+1)/2;
   giverObjs.forEach(g=>{g.visible=!mission;g.children[1].position.y=48+pulse*5;});
-  const t=missionTarget();beam.visible=beamRing.visible=!!t&&mission.type!=='contrat';nextRing.visible=false;targetArrow.visible=!!t&&mission.type==='contrat';if(!t)return;
-  if(mission.type==='contrat'){targetArrow.position.set(t.x,groundH(t.x,t.y)+36+pulse*5,t.y);targetArrow.rotation.y=time*3;return;}
+  const t0=missionTarget(),t=t0||(waypoint&&!player.inside?{x:waypoint.x,y:waypoint.y,col:'#40c0ff'}:null),mt=mission?mission.type:'repere';beam.visible=beamRing.visible=!!t&&mt!=='contrat';nextRing.visible=false;targetArrow.visible=!!t&&mt==='contrat';if(!t)return;
+  if(mt==='contrat'){targetArrow.position.set(t.x,groundH(t.x,t.y)+36+pulse*5,t.y);targetArrow.rotation.y=time*3;return;}
   const gh=groundH(t.x,t.y);beam.material.color.set(t.col);beamRing.material.color.set(t.col);beam.position.set(t.x,350,t.y);beamRing.position.set(t.x,gh+0.6,t.y);beam.material.opacity=0.12+pulse*0.1;
-  if(mission.type==='course'&&mission.idx+1<mission.cps.length){const n=mission.cps[mission.idx+1];nextRing.visible=true;nextRing.position.set(n.x,0.6,n.y);}}
+  if(mt==='course'&&mission.idx+1<mission.cps.length){const n=mission.cps[mission.idx+1];nextRing.visible=true;nextRing.position.set(n.x,0.6,n.y);}}
 function syncLampLights(){
   if(player.inside){const I=player.inside;lampLights.forEach((L,i)=>{const d=I.lights[i];if(!d){L.intensity=0;return;}L.position.set(I.ox+d[0],d[1],I.oy+d[2]);let col=d[3];if(I.disco&&d[5])col=['#ff2fb0','#7a40ff','#20e0ff','#ffb020'][(Math.floor(time*2)+i)%4];L.color.set(col);L.intensity=d[4];});return;}
   for(const L of lampLights)L.color.set('#ffd29a');
@@ -2369,7 +2451,7 @@ function update(dt){
   if(started){updatePlayer(dt);if(!player.alive){deadT-=dt;if(deadT<=0)respawn();}}
   updateCars(dt);carCollisions();pedCarHit();
   for(const p of peds)updatePed(p,dt);
-  updateRockets(dt);updateNet(dt);updateSinking(dt);updateInteriors(dt);updateDrunk(dt);
+  updateRockets(dt);updateNet(dt);if(started)updateArea(dt);updateSinking(dt);updateInteriors(dt);updateDrunk(dt);
   flowTimer-=dt;if(flowTimer<=0&&(wanted>0||(mission&&mission.type==='contrat'))){buildFlow();flowTimer=0.35;}
   if(started){updateWanted(dt);updateMission(dt);updatePickups(dt);}
   manageSpawns(dt);updateFx(dt);updateAudio();
@@ -2405,7 +2487,7 @@ function render(dt){
   updateFade(dt||0.016);grade.uniforms.time.value=time;grade.uniforms.hurt.value=Math.max(0,player.hurtT)*2;grade.uniforms.drunk.value=br?0.95:player.drunk>0.25?Math.min(1.5,player.drunk-0.2)*0.8:0;grade.uniforms.fade.value=fade;
   syncRemotes(dt);updateAtmos(dt);
   composer.render();
-  ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);drawHUD();
+  ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);drawHUD();syncNameInput();
 }
 
 // ----------------------------- HUD -----------------------------
@@ -2434,7 +2516,7 @@ function drawMinimap(){
   if(!mission)for(const g of givers)dot(g.x,g.y,'#ffd23f',5,true);
   for(const c of cars)if(c.driver==='cop'&&c.chaser&&c.hp>0)dot(c.x,c.y,Math.floor(time*6)%2?'#ff3030':'#3060ff',3,false);
   for(const p of peds)if(p.kind==='cop'&&p.state!=='dead'&&wanted>0)dot(p.x,p.y,'#6a8cff',2,false);
-  const t=missionTarget();if(t)dot(t.x,t.y,t.col,5,true);
+  const t=missionTarget();if(t)dot(t.x,t.y,t.col,5,true);if(waypoint)dot(waypoint.x,waypoint.y,'#40c0ff',5,true);
   ctx.translate(x+S/2,y+S/2);
   ctx.save();ctx.rotate(camYaw);ctx.fillStyle='rgba(255,255,255,0.12)';ctx.beginPath();ctx.moveTo(0,0);ctx.arc(0,0,S,-0.5,0.5);ctx.closePath();ctx.fill();ctx.restore();
   ctx.rotate(player.car?player.car.a:player.bodyA);ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=1.5;
@@ -2472,7 +2554,8 @@ function drawHUD(){
     txt(mission.name,pad,pad,'#ffd23f','20px '+FONT);txt(mission.obj(),pad,pad+30,'#fff','bold 15px sans-serif');
     txt(ts,pad,pad+52,m<10&&Math.floor(time*4)%2?'#ff5252':'#fff','26px '+FONT);}
   else txt('Va sur un « M » jaune pour une mission',pad,pad,'rgba(255,255,255,0.85)','bold 14px sans-serif');
-  const t=missionTarget();if(t)compass(t);
+  const t=missionTarget()||(waypoint?{x:waypoint.x,y:waypoint.y,col:'#40c0ff'}:null);if(t&&!player.inside)compass(t);
+  if(areaShowT>0&&areaName){ctx.globalAlpha=clamp(areaShowT,0,1);txt(areaName,W-18,H-110,'#fff','22px '+FONT,'right','bottom');ctx.globalAlpha=1;}
   if(!lap&&!player.car&&player.alive&&(nearMark()||nearDoor())){const mk=nearMark(),dr=nearDoor();txt(mk?'[E] '+mk.label:'[E] Entrer : '+dr.name,W/2,H*0.64,mk?'#ffd23f':'#ff4fd8','bold 17px sans-serif','center');}
   else if(!player.car&&player.alive&&!player.inside){const best=nearestCar();
     if(best)txt('[E] '+(best.driver&&best.driver!=='player'?'Voler : ':'Monter : ')+CT[best.type].name,W/2,H*0.64,'#fff','bold 16px sans-serif','center');}
@@ -2488,9 +2571,10 @@ function drawHUD(){
     ctx.arc(cx,cy,r,0,TAU);ctx.moveTo(cx-14,cy);ctx.lineTo(cx-r-2,cy);ctx.moveTo(cx+r+2,cy);ctx.lineTo(cx+14,cy);ctx.moveTo(cx,cy-14);ctx.lineTo(cx,cy-r-2);ctx.moveTo(cx,cy+r+2);ctx.lineTo(cx,cy+14);ctx.stroke();}
   else if(!lap&&!paused&&player.alive){ctx.fillStyle='rgba(255,255,255,0.7)';ctx.beginPath();ctx.arc(W/2,H/2,2.5,0,TAU);ctx.fill();}
   drawLap();
+  if(mapOpen&&started)drawFullMap();
   if(paused)drawPause();
 }
-const HELP=[['ZQSD / WASD','Se déplacer / conduire'],['Souris','Caméra et visée'],['Clic gauche','Frapper / tirer'],['Clic droit','Viser (zoom épaule)'],['Espace','Sauter • frein à main en voiture'],['Maj','Courir'],['E','Monter / voler / sortir d\'un véhicule'],['1 à 7 / molette','Armes (1 = poings, sans arme)'],['V','Vue première / troisième personne'],['T','Chat (/nom Pseudo • /salle nom)'],['R / H','Radio / klaxon (en voiture)'],['E (devant une porte)','Entrer : bar, club, armurerie, planque'],['G','Qualité graphique (si ça rame)'],['P / Échap','Pause'],['M','Couper le son']];
+const HELP=[['ZQSD / WASD','Se déplacer / conduire'],['Souris','Caméra et visée'],['Clic gauche','Frapper / tirer'],['Clic droit','Viser (zoom épaule)'],['Espace','Sauter • frein à main en voiture'],['Maj','Courir'],['E','Monter / voler / sortir d\'un véhicule'],['1 à 7 / molette','Armes (1 = poings, sans arme)'],['V','Vue première / troisième personne'],['C','Carte (clic : repère GPS)'],['T','Tchat (et codes de triche)'],['R / H','Radio / klaxon (en voiture)'],['E (devant une porte)','Entrer : bar, club, armurerie, planque'],['G','Qualité graphique (si ça rame)'],['P / Échap','Pause'],['M','Couper le son']];
 function drawHelp(y){
   const w=Math.min(560,W-40),x=W/2-w/2;
   HELP.forEach(([k,v],i)=>{txt(k,x+w*0.42,y+i*25,'#ffd23f','bold 15px sans-serif','right');txt(v,x+w*0.46,y+i*25,'#fff','15px sans-serif','left');});
@@ -2504,6 +2588,7 @@ function drawTitle(){
   txt('Monde ouvert • jour/nuit • météo dynamique',W/2,y+Math.min(60,W/14),'#5fd3ff','bold 20px sans-serif','center','middle');
   drawHelp(y+95);
   txt('MULTIJOUEUR : salle « '+roomName+' » — '+(remotes.size+1)+' joueur(s) connecté(s)  •  '+netStatus+'  •  version '+GAME_VERSION,W/2,H-92,'#7CFC7C','bold 15px sans-serif','center','middle');
+  txt('TON PSEUDO',W/2,H-158,'#ff4fd8','bold 13px sans-serif','center','middle');
   if(Math.floor(time*2)%2)txt('CLIQUE POUR JOUER',W/2,H-50,'#fff','28px '+FONT,'center','middle');
 }
 function drawPause(){ctx.fillStyle='rgba(5,8,15,0.72)';ctx.fillRect(0,0,W,H);txt('PAUSE',W/2,H*0.09,'#fff','52px '+FONT,'center','middle');
