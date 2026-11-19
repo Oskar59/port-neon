@@ -2029,20 +2029,31 @@ function updateInteriors(dt){
 // =====================================================================
 //  MULTIJOUEUR (pair-à-pair WebRTC via Trystero, sans serveur)
 // =====================================================================
-const GAME_VERSION='1.4';let net=null,netT=0,helloT=0,lastHit=null;const remotes=new Map();
+const GAME_VERSION='1.5';let net=null,netT=0,helloT=0,lastHit=null;const remotes=new Map();
 let myName='Joueur'+Math.floor(100+Math.random()*900);try{const n=localStorage.getItem('portneon_name');if(n)myName=n;}catch(e){}
 const roomName=((location.hash||'').match(/^#salle-([a-z0-9-]{2,24})$/i)||[])[1]||'public';
 let netStatus='connexion…';
+let evSeq=0;const seenEv=new Set();
 async function startNet(){
-  try{const TR=await import('https://cdn.jsdelivr.net/npm/trystero@0.21.4/+esm');
-    const room=TR.joinRoom({appId:'port-neon-oskar59-v1',relayUrls:['wss://relay.damus.io','wss://nos.lol','wss://relay.primal.net','wss://relay.nostr.band','wss://nostr.mom','wss://relay.snort.social','wss://offchain.pub','wss://relay.nostr.net'],relayRedundancy:8,rtcConfig:{iceServers:[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:global.stun.twilio.com:3478']},{urls:['turn:openrelay.metered.ca:80','turn:openrelay.metered.ca:443','turn:openrelay.metered.ca:443?transport=tcp'],username:'openrelayproject',credential:'openrelayproject'}]}},roomName);
-    const [sSt,gSt]=room.makeAction('st'),[sEv,gEv]=room.makeAction('ev');
-    net={room,sSt,sEv,id:TR.selfId,relays:TR.getRelaySockets};netStatus='en ligne';
-    room.onPeerJoin(id=>{sEv({k:'hello',name:myName,look:player.look},id);});
-    room.onPeerLeave(id=>{const r=remotes.get(id);if(r&&r.name)note(r.name+' a quitté la partie');removeRemote(id);});
-    gSt((d,id)=>{const r=getRemote(id);r.cur=d;r.seen=performance.now();if(d.n&&d.n!==r.name){if(r.name)setRemoteName(r,d.n);else r.name=d.n;}});
-    gEv((d,id)=>netEvent(d,id));
+  try{const mqtt=(await import('https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.esm.js')).default;
+    const id=Math.random().toString(36).slice(2,10),base='portneon/v2/'+roomName+'/';
+    const urls=['wss://broker.emqx.io:8084/mqtt','wss://broker.hivemq.com:8884/mqtt'];
+    const clients=urls.map(u=>{const c=mqtt.connect(u,{clientId:'pn_'+id+'_'+Math.random().toString(36).slice(2,6),clean:true,reconnectPeriod:3000,connectTimeout:9000,keepalive:30});
+      c.on('connect',()=>{c.subscribe(base+'#');netStatus='en ligne';netSend({k:'hello',name:myName,look:player.look});});
+      c.on('message',(topic,payload)=>onNetMsg(topic.slice(base.length),payload));
+      c.on('error',e=>console.warn('mqtt',u,e&&e.message));return c;});
+    const pub=(t,o)=>{const str=JSON.stringify(o);for(const c of clients)if(c.connected)c.publish(base+t,str,{qos:0});};
+    net={id,clients,sSt:o=>pub('s/'+id,o),sEv:o=>{o.u=id+'_'+(++evSeq);pub('e/'+id,o);},
+      relays:()=>Object.fromEntries(clients.map((c,i)=>[urls[i],{readyState:c.connected?1:0}]))};
   }catch(e){console.warn('Multijoueur',e);netStatus='hors ligne';}
+}
+function onNetMsg(rest,payload){
+  const parts=rest.split('/'),kind=parts[0],from=parts[1];if(!net||!from||from===net.id)return;
+  let d;try{d=JSON.parse(payload.toString());}catch(e){return;}
+  const isNew=!remotes.has(from);const r=getRemote(from);r.seen=performance.now();
+  if(kind==='s'){r.cur=d;if(d.n&&d.n!==r.name){if(r.name)setRemoteName(r,d.n);else r.name=d.n;}}
+  else if(kind==='e'){if(d.u){if(seenEv.has(d.u))return;seenEv.add(d.u);if(seenEv.size>3000)seenEv.clear();}netEvent(d,from);}
+  if(isNew)netSend({k:'hello',name:myName,look:player.look});
 }
 function getRemote(id){let r=remotes.get(id);if(!r){r={id,name:null,look:null,cur:null,h:null,car:null,seen:performance.now(),ramT:0};remotes.set(id,r);}return r;}
 function setRemoteName(r,n){r.name=String(n).slice(0,16);if(r.h&&r.lbl){r.h.g.remove(r.lbl);r.lbl=label(r.name,'#9fe8ff',6);r.lbl.position.y=29;r.h.g.add(r.lbl);}}
@@ -2060,7 +2071,7 @@ function netEvent(d,id){const r=getRemote(id);r.seen=performance.now();
   else if(d.k==='dead'){if(d.by===net.id){player.money+=500;SFX.cash();note('Tu as éliminé '+(r.name||'?')+' — prime $500');}
     else{const k=d.by&&remotes.get(d.by);note(k?(k.name+' a éliminé '+(r.name||'?')):((r.name||'?')+' est mort'));}}
 }
-function netSend(o){if(net)try{net.sEv(o);}catch(e){}}
+function netSend(o){if(net)try{net.sEv(Object.assign({},o));}catch(e){}}
 function netShot(x,y,a){netSend({k:'shot',x:Math.round(x),y:Math.round(y),a:+a.toFixed(3),w:player.w});}
 function netBoom(x,y){netSend({k:'boom',x:Math.round(x),y:Math.round(y)});}
 function netHit(id,dmg){netSend({k:'hit',to:id,dmg:Math.max(1,Math.round(dmg))});}
@@ -2072,12 +2083,12 @@ function myState(){const c=player.car;return {x:Math.round(player.x),y:Math.roun
   c:c?{t:c.type,k:c.col,x:Math.round(c.x),y:Math.round(c.y),a:+c.a.toFixed(3),vx:Math.round(c.vx),vy:Math.round(c.vy),s:c.siren?1:0}:null};}
 function updateNet(dt){
   if(!net||!started)return;netT-=dt;helloT-=dt;
-  if(netT<=0){netT=1/12;try{net.sSt(myState());}catch(e){}}
+  if(netT<=0){netT=1/10;try{net.sSt(myState());}catch(e){}}
   if(helloT<=0){helloT=10;netSend({k:'hello',name:myName,look:player.look});}
 }
 function syncRemotes(dt){
   const now=performance.now(),k=Math.min(1,dt*12);
-  for(const [id,r] of remotes){const s=r.cur;if(!s)continue;if(now-r.seen>9000){removeRemote(id);continue;}
+  for(const [id,r] of remotes){const s=r.cur;if(!s)continue;if(now-r.seen>9000){if(r.name)note(r.name+' a quitté la partie');removeRemote(id);continue;}
     if(s.c){if(!r.car||r.car.type!==s.c.t){dropRemoteCar(r);const c=makeCar(s.c.t,s.c.x,s.c.y,s.c.a);c.driver='remote';c.remote=id;c.h=groundH(s.c.x,s.c.y);cars.push(c);r.car=c;}
       const c=r.car;c.x+=(s.c.x+s.c.vx*0.06-c.x)*k;c.y+=(s.c.y+s.c.vy*0.06-c.y)*k;c.a+=angDiff(c.a,s.c.a)*k;c.vx=s.c.vx;c.vy=s.c.vy;c.v=c.vx*Math.cos(c.a)+c.vy*Math.sin(c.a);
       c.siren=!!s.c.s;c.col=s.c.k;c.hp=c.maxHp;c.braking=false;}
@@ -2112,8 +2123,8 @@ function drawNet(){
   const n=[...remotes.values()].filter(r=>r.cur&&r.name);
   const x=18,y=mission?96:40;
   let rel='';if(net&&net.relays){try{const so=Object.values(net.relays());rel=so.filter(w=>w&&w.readyState===1).length+'/'+so.length;}catch(e){}}
-  txt('● '+(net?'En ligne':'Multijoueur : '+netStatus)+' — salle « '+roomName+' » — '+(n.length+1)+' joueur'+(n.length?'s':''),x,y,net?'#7CFC7C':'#ffb020','bold 13px sans-serif');
-  if(net&&!n.length)txt('Recherche des autres joueurs… (serveurs de connexion : '+rel+')  •  version '+GAME_VERSION,x,y+(8*16)+22,'#ffd23f','12px sans-serif');
+  txt('● '+(net&&netStatus==='en ligne'?'En ligne':'Multijoueur : '+netStatus)+' — salle « '+roomName+' » — '+(n.length+1)+' joueur'+(n.length?'s':''),x,y,net?'#7CFC7C':'#ffb020','bold 13px sans-serif');
+  if(net&&!n.length)txt('Recherche des autres joueurs… (serveurs : '+rel+')  •  version '+GAME_VERSION,x,y+(8*16)+22,'#ffd23f','12px sans-serif');
   [myName+' (toi)',...n.map(r=>r.name)].slice(0,8).forEach((nm,i)=>txt(nm,x+12,y+18+i*16,i?'#cfe8ff':'#ffd23f','12px sans-serif'));
   const S=Math.round(clamp(Math.min(W,H)*0.27,140,230)),by=H-S-40;
   chatLog.filter(c=>time-c.t<18).slice(-6).forEach((c,i,a)=>{ctx.globalAlpha=clamp(18-(time-c.t),0,1);txt(c.name+' : '+c.msg,18,by-(a.length-1-i)*19,'#fff','bold 14px sans-serif','left','bottom');});ctx.globalAlpha=1;
