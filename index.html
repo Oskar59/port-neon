@@ -2029,15 +2029,15 @@ function updateInteriors(dt){
 // =====================================================================
 //  MULTIJOUEUR (pair-à-pair WebRTC via Trystero, sans serveur)
 // =====================================================================
-let net=null,netT=0,helloT=0,lastHit=null;const remotes=new Map();
+const GAME_VERSION='1.4';let net=null,netT=0,helloT=0,lastHit=null;const remotes=new Map();
 let myName='Joueur'+Math.floor(100+Math.random()*900);try{const n=localStorage.getItem('portneon_name');if(n)myName=n;}catch(e){}
 const roomName=((location.hash||'').match(/^#salle-([a-z0-9-]{2,24})$/i)||[])[1]||'public';
 let netStatus='connexion…';
 async function startNet(){
   try{const TR=await import('https://cdn.jsdelivr.net/npm/trystero@0.21.4/+esm');
-    const room=TR.joinRoom({appId:'port-neon-oskar59-v1'},roomName);
+    const room=TR.joinRoom({appId:'port-neon-oskar59-v1',relayUrls:['wss://relay.damus.io','wss://nos.lol','wss://relay.primal.net','wss://relay.nostr.band','wss://nostr.mom','wss://relay.snort.social','wss://offchain.pub','wss://relay.nostr.net'],relayRedundancy:8,rtcConfig:{iceServers:[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302','stun:global.stun.twilio.com:3478']},{urls:['turn:openrelay.metered.ca:80','turn:openrelay.metered.ca:443','turn:openrelay.metered.ca:443?transport=tcp'],username:'openrelayproject',credential:'openrelayproject'}]}},roomName);
     const [sSt,gSt]=room.makeAction('st'),[sEv,gEv]=room.makeAction('ev');
-    net={room,sSt,sEv,id:TR.selfId};netStatus='en ligne';
+    net={room,sSt,sEv,id:TR.selfId,relays:TR.getRelaySockets};netStatus='en ligne';
     room.onPeerJoin(id=>{sEv({k:'hello',name:myName,look:player.look},id);});
     room.onPeerLeave(id=>{const r=remotes.get(id);if(r&&r.name)note(r.name+' a quitté la partie');removeRemote(id);});
     gSt((d,id)=>{const r=getRemote(id);r.cur=d;r.seen=performance.now();if(d.n&&d.n!==r.name){if(r.name)setRemoteName(r,d.n);else r.name=d.n;}});
@@ -2111,7 +2111,9 @@ chatInput.addEventListener('keyup',e=>e.stopPropagation());
 function drawNet(){
   const n=[...remotes.values()].filter(r=>r.cur&&r.name);
   const x=18,y=mission?96:40;
+  let rel='';if(net&&net.relays){try{const so=Object.values(net.relays());rel=so.filter(w=>w&&w.readyState===1).length+'/'+so.length;}catch(e){}}
   txt('● '+(net?'En ligne':'Multijoueur : '+netStatus)+' — salle « '+roomName+' » — '+(n.length+1)+' joueur'+(n.length?'s':''),x,y,net?'#7CFC7C':'#ffb020','bold 13px sans-serif');
+  if(net&&!n.length)txt('Recherche des autres joueurs… (serveurs de connexion : '+rel+')  •  version '+GAME_VERSION,x,y+(8*16)+22,'#ffd23f','12px sans-serif');
   [myName+' (toi)',...n.map(r=>r.name)].slice(0,8).forEach((nm,i)=>txt(nm,x+12,y+18+i*16,i?'#cfe8ff':'#ffd23f','12px sans-serif'));
   const S=Math.round(clamp(Math.min(W,H)*0.27,140,230)),by=H-S-40;
   chatLog.filter(c=>time-c.t<18).slice(-6).forEach((c,i,a)=>{ctx.globalAlpha=clamp(18-(time-c.t),0,1);txt(c.name+' : '+c.msg,18,by-(a.length-1-i)*19,'#fff','bold 14px sans-serif','left','bottom');});ctx.globalAlpha=1;
@@ -2411,7 +2413,8 @@ function drawMinimap(){
   const toM=(wx,wy)=>[x+S/2+(wx/T-px)*s,y+S/2+(wy/T-py)*s];
   const dot=(wx,wy,col,r,clampIt)=>{let [mx,my]=toM(wx,wy);if(clampIt){mx=clamp(mx,x+5,x+S-5);my=clamp(my,y+5,y+S-5);}
     ctx.fillStyle=col;ctx.beginPath();ctx.arc(mx,my,r,0,TAU);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=1.5;ctx.stroke();};
-  dot(hospPos.x,hospPos.y,'#ff4d4d',4,false);dot(policePos.x,policePos.y,'#4d7cff',4,false);dot(garage.x,garage.y,'#5fd3ff',4,true);for(const I of INT)if(I.door)dot(I.door.x,I.door.y,{bar:'#ff3fb0',club:'#b040ff',gun:'#ffb020',flat:'#5fd3ff'}[I.id],4.5,true);
+  dot(hospPos.x,hospPos.y,'#ff4d4d',4,false);dot(policePos.x,policePos.y,'#4d7cff',4,false);dot(garage.x,garage.y,'#5fd3ff',4,true);for(const r of remotes.values()){const s=r.cur;if(s&&!s.i&&r.x!==undefined)dot(s.c?s.c.x:r.x,s.c?s.c.y:r.y,'#ff4fd8',5.5,true);}
+  for(const I of INT)if(I.door)dot(I.door.x,I.door.y,{bar:'#ff3fb0',club:'#b040ff',gun:'#ffb020',flat:'#5fd3ff'}[I.id],4.5,true);
   if(!mission)for(const g of givers)dot(g.x,g.y,'#ffd23f',5,true);
   for(const c of cars)if(c.driver==='cop'&&c.chaser&&c.hp>0)dot(c.x,c.y,Math.floor(time*6)%2?'#ff3030':'#3060ff',3,false);
   for(const p of peds)if(p.kind==='cop'&&p.state!=='dead'&&wanted>0)dot(p.x,p.y,'#6a8cff',2,false);
@@ -2484,7 +2487,7 @@ function drawTitle(){
   txt('PORT NÉON',W/2,y,'#ff4fd8',Math.round(clamp(W/10,40,96))+'px '+FONT,'center','middle');
   txt('Monde ouvert • jour/nuit • météo dynamique',W/2,y+Math.min(60,W/14),'#5fd3ff','bold 20px sans-serif','center','middle');
   drawHelp(y+95);
-  txt('MULTIJOUEUR : salle « '+roomName+' » — '+(remotes.size+1)+' joueur(s) connecté(s)  •  '+netStatus,W/2,H-92,'#7CFC7C','bold 15px sans-serif','center','middle');
+  txt('MULTIJOUEUR : salle « '+roomName+' » — '+(remotes.size+1)+' joueur(s) connecté(s)  •  '+netStatus+'  •  version '+GAME_VERSION,W/2,H-92,'#7CFC7C','bold 15px sans-serif','center','middle');
   if(Math.floor(time*2)%2)txt('CLIQUE POUR JOUER',W/2,H-50,'#fff','28px '+FONT,'center','middle');
 }
 function drawPause(){ctx.fillStyle='rgba(5,8,15,0.72)';ctx.fillRect(0,0,W,H);txt('PAUSE',W/2,H*0.09,'#fff','52px '+FONT,'center','middle');
